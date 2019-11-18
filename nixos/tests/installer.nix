@@ -8,8 +8,11 @@ with pkgs.lib;
 let
 
   # The configuration to install.
-  makeConfig = { bootLoader, grubVersion, grubDevice, grubIdentifier, grubUseEfi
-               , extraConfig, forceGrubReinstallCount ? 0
+  makeConfig = { bootLoader, extraConfig
+                # TODO we should take these from extraInstallerOptions or so
+               , installerUseBootLoader, installerUseEFIBoot
+               # grub-specific
+               , grubVersion, grubDevice, grubIdentifier, grubUseEfi, forceGrubReinstallCount ? 0
                }:
     pkgs.writeText "configuration.nix" ''
       { config, lib, pkgs, modulesPath, ... }:
@@ -47,7 +50,9 @@ let
 
         ${optionalString (bootLoader == "refind") ''
           boot.loader.refind.enable = true;
-          boot.loader.refind.installAsRemovable = true; # required as initial nixos-install is run in bios-mode
+        ''}
+        ${optionalString (bootLoader == "refind" && !(installerUseBootLoader && installerUseEFIBoot)) ''
+          boot.loader.refind.installAsRemovable = true;
         ''}
 
         users.users.alice = {
@@ -67,13 +72,17 @@ let
   # disk, and then reboot from the hard disk.  It's parameterized with
   # a test script fragment `createPartitions', which must create
   # partitions and filesystems.
-  testScriptFun = { bootLoader, createPartitions, grubVersion, grubDevice, grubUseEfi
-                  , grubIdentifier, preBootCommands, extraConfig
+  testScriptFun = { bootLoader, extraConfig
+                  , createPartitions, preBootCommands
+                  # installer-specific
+                  , installerUseBootLoader, installerUseEFIBoot
+                  # test-specific
                   , testCloneConfig
+                  # grub-specific
+                  , grubVersion, grubDevice, grubUseEfi, grubIdentifier
                   }:
     let
 
-      iface = if grubVersion == 1 then "ide" else "virtio";
       isEfi = bootLoader == "systemd-boot"
         || bootLoader == "refind"
         || (bootLoader == "grub" && grubUseEfi);
@@ -87,11 +96,13 @@ let
           (optionalString (system == "aarch64-linux") "-enable-kvm -machine virt,gic-version=host -cpu host ");
 
         hda = "vm-state-machine/machine.qcow2";
-        hdaInterface = iface;
-      } // (optionalAttrs isEfi {
-        bios = if pkgs.stdenv.isAarch64
-          then "${pkgs.OVMF.fd}/FV/QEMU_EFI.fd"
-          else "${pkgs.OVMF.fd}/FV/OVMF.fd";
+        hdaInterface = if grubVersion == 1 then "ide" else "virtio";
+      } // (optionalAttrs (isEfi && !(installerUseBootLoader && installerUseEFIBoot)) {
+        # TODO cant we get rid of this case ?
+        bios = "${pkgs.OVMF.fd}/FV/OVMF.fd";
+      }) //(optionalAttrs (isEfi && installerUseBootLoader && installerUseEFIBoot) {
+        efiFirmware = "efi_firmware.bin";
+        efiVars = "efi_vars.bin";
       })));
 
     in if !isEfi && !(pkgs.stdenv.isi686 || pkgs.stdenv.isx86_64) then
@@ -122,7 +133,7 @@ let
       machine.succeed("cat /mnt/etc/nixos/hardware-configuration.nix >&2")
 
       machine.copy_file_from_host(
-          "${ makeConfig { inherit bootLoader grubVersion grubDevice grubIdentifier grubUseEfi extraConfig; } }",
+          "${ makeConfig { inherit bootLoader grubVersion grubDevice grubIdentifier grubUseEfi extraConfig installerUseBootLoader installerUseEFIBoot; } }",
           "/mnt/etc/nixos/configuration.nix",
       )
 
@@ -151,7 +162,9 @@ let
 
       ${if bootLoader == "grub" then
           ''machine.succeed("test -e /boot/grub")''
-        else if bootLoader == "refind" then
+        else if (bootLoader == "refind" && installerUseBootLoader && installerUseEFIBoot) then
+          ''machine.succeed("test -e /boot/EFI/refind/refind.conf")''
+        else if (bootLoader == "refind") then
           ''machine.succeed("test -e /boot/EFI/BOOT/refind.conf")''
         else
           ''machine.succeed("test -e /boot/loader/loader.conf")''
@@ -177,7 +190,7 @@ let
 
       # We need a writable Nix store on next boot.
       machine.copy_file_from_host(
-          "${ makeConfig { inherit bootLoader grubVersion grubDevice grubIdentifier grubUseEfi extraConfig; forceGrubReinstallCount = 1; } }",
+          "${ makeConfig { inherit bootLoader grubVersion grubDevice grubIdentifier grubUseEfi extraConfig installerUseBootLoader installerUseEFIBoot; forceGrubReinstallCount = 1; } }",
           "/etc/nixos/configuration.nix",
       )
 
@@ -198,7 +211,7 @@ let
       ${preBootCommands}
       machine.wait_for_unit("multi-user.target")
       machine.copy_file_from_host(
-          "${ makeConfig { inherit bootLoader grubVersion grubDevice grubIdentifier grubUseEfi extraConfig; forceGrubReinstallCount = 2; } }",
+          "${ makeConfig { inherit bootLoader grubVersion grubDevice grubIdentifier grubUseEfi extraConfig installerUseBootLoader installerUseEFIBoot; forceGrubReinstallCount = 2; } }",
           "/etc/nixos/configuration.nix",
       )
       machine.succeed("nixos-rebuild boot >&2")
@@ -255,7 +268,8 @@ let
 
   makeInstallerTest = name:
     { createPartitions, preBootCommands ? "", extraConfig ? ""
-    , extraInstallerConfig ? {}
+    , installerExtraConfig ? {}
+    , installerUseBootLoader ? false, installerUseEFIBoot ? false
     , bootLoader ? "grub" # either "grub" or "systemd-boot" or "refind"
     , grubVersion ? 2, grubDevice ? "/dev/vda", grubIdentifier ? "uuid", grubUseEfi ? false
     , enableOCR ? false, meta ? {}
@@ -277,7 +291,7 @@ let
           { imports =
               [ ../modules/profiles/installation-device.nix
                 ../modules/profiles/base.nix
-                extraInstallerConfig
+                installerExtraConfig
               ];
 
             virtualisation.diskSize = 8 * 1024;
@@ -287,13 +301,24 @@ let
             # installer. This ensures the target disk (/dev/vda) is
             # the same during and after installation.
             virtualisation.emptyDiskImages = [ 512 ];
-            virtualisation.bootDevice =
-              if grubVersion == 1 then "/dev/sdb" else "/dev/vdb";
+            # TODO this has originally been vdb. what to do here ?
+            virtualisation.bootDevice = if installerUseBootLoader
+              then (if grubVersion == 1 then "/dev/sdc" else "/dev/vdc")
+              else (if grubVersion == 1 then "/dev/sdb" else "/dev/vdb");
+
+            # FIXME why scsi when grubVersion==1, while testScriptFun uses ide in that case ?
             virtualisation.qemu.diskInterface =
               if grubVersion == 1 then "scsi" else "virtio";
 
+            virtualisation.useBootLoader = installerUseBootLoader;
+            virtualisation.useEFIBoot = installerUseEFIBoot;
+
             boot.loader.systemd-boot.enable = mkIf (bootLoader == "systemd-boot") true;
-            boot.loader.refind.enable = mkIf (bootLoader == "refind") true;
+            boot.loader.refind = mkIf (bootLoader == "refind") {
+              enable = true;
+              # TODO is this even required, as we pass kernel+init to ovmf anyway?
+              installAsRemovable = !(installerUseBootLoader && installerUseEFIBoot);
+            };
 
             hardware.enableAllFirmware = mkForce false;
 
@@ -334,8 +359,10 @@ let
       };
 
       testScript = testScriptFun {
-        inherit bootLoader createPartitions preBootCommands
-                grubVersion grubDevice grubIdentifier grubUseEfi extraConfig
+        inherit bootLoader extraConfig
+                createPartitions preBootCommands
+                grubVersion grubDevice grubIdentifier grubUseEfi
+                installerUseBootLoader installerUseEFIBoot
                 testCloneConfig;
       };
     };
@@ -411,28 +438,6 @@ let
         grubUseEfi = true;
     };
 
-  simple-uefi-refind-config =
-    { createPartitions =
-        ''
-          machine.succeed(
-              "flock /dev/vda parted --script /dev/vda -- mklabel gpt"
-              " mkpart ESP fat32 1M 50MiB"  # /boot
-              " set 1 boot on"
-              " mkpart primary linux-swap 50MiB 1024MiB"
-              " mkpart primary ext2 1024MiB -1MiB",  # /
-              "udevadm settle",
-              "mkswap /dev/vda2 -L swap",
-              "swapon -L swap",
-              "mkfs.ext3 -L nixos /dev/vda3",
-              "mount LABEL=nixos /mnt",
-              "mkfs.vfat -n BOOT /dev/vda1",
-              "mkdir -p /mnt/boot",
-              "mount LABEL=BOOT /mnt/boot",
-          )
-        '';
-        bootLoader = "refind";
-    };
-
   clone-test-extraconfig = { extraConfig =
          ''
          environment.systemPackages = [ pkgs.grub2 ];
@@ -494,7 +499,29 @@ in {
   # Test cloned configurations with the uefi grub configuration
   simpleUefiGrubClone = makeInstallerTest "simpleUefiGrubClone" (simple-uefi-grub-config // clone-test-extraconfig);
 
-  simpleUefiRefind = makeInstallerTest "simpleUefiRefind" simple-uefi-refind-config;
+  simpleUefiRefind = makeInstallerTest "simpleUefiRefind"
+    { createPartitions =
+        ''
+          machine.succeed(
+              "flock /dev/vda parted --script /dev/vda -- mklabel gpt"
+              " mkpart ESP fat32 1M 50MiB"  # /boot
+              " set 1 boot on"
+              " mkpart primary linux-swap 50MiB 1024MiB"
+              " mkpart primary ext2 1024MiB -1MiB",  # /
+              "udevadm settle",
+              "mkswap /dev/vda2 -L swap",
+              "swapon -L swap",
+              "mkfs.ext3 -L nixos /dev/vda3",
+              "mount LABEL=nixos /mnt",
+              "mkfs.vfat -n BOOT /dev/vda1",
+              "mkdir -p /mnt/boot",
+              "mount LABEL=BOOT /mnt/boot",
+          )
+        '';
+        bootLoader = "refind";
+        # installerUseBootLoader = true;
+        # installerUseEFIBoot = true;
+    };
 
   # Same as the previous, but now with a separate /boot partition.
   separateBoot = makeInstallerTest "separateBoot"
@@ -541,7 +568,7 @@ in {
   # zfs on / with swap
   zfsroot = makeInstallerTest "zfs-root"
     {
-      extraInstallerConfig = {
+      installerExtraConfig = {
         boot.supportedFilesystems = [ "zfs" ];
       };
 

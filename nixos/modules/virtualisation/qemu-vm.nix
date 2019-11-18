@@ -101,8 +101,10 @@ let
 
         ${if cfg.useEFIBoot then ''
           # VM needs a writable flash BIOS.
-          cp ${bootDisk}/bios.bin $TMPDIR || exit 1
-          chmod 0644 $TMPDIR/bios.bin || exit 1
+          cp ${bootDisk}/efi_firmware.bin $TMPDIR || exit 1
+          cp ${bootDisk}/efi_vars.bin $TMPDIR || exit 1
+          chmod 0444 $TMPDIR/efi_firmware.bin || exit 1
+          chmod 0644 $TMPDIR/efi_vars.bin || exit 1
         '' else ''
         ''}
       '' else ''
@@ -147,18 +149,26 @@ let
             ''
               mkdir $out
               diskImage=$out/disk.img
-              bootFlash=$out/bios.bin
+              efiFirmware=$out/efi_firmware.bin
+              efiVars=$out/efi_vars.bin
               ${qemu}/bin/qemu-img create -f qcow2 $diskImage "40M"
               ${if cfg.useEFIBoot then ''
-                cp ${pkgs.OVMF-CSM.fd}/FV/OVMF.fd $bootFlash
-                chmod 0644 $bootFlash
+                cp ${pkgs.OVMF.fd}/FV/OVMF_CODE.fd $efiFirmware
+                chmod 0444 $efiFirmware
+                cp ${pkgs.OVMF.fd}/FV/OVMF_VARS.fd $efiVars
+                chmod 0644 $efiVars
               '' else ''
               ''}
             '';
+
           buildInputs = [ pkgs.utillinux ];
           QEMU_OPTS = if cfg.useEFIBoot
-                      then "-pflash $out/bios.bin -nographic -serial pty"
-                      else "-nographic -serial pty";
+                      then builtins.concatStringsSep " " [
+                        "-nographic"
+                        "-drive if=pflash,format=raw,readonly,file=$efiFirmware"
+                        "-drive if=pflash,format=raw,file=$efiVars"
+                      ]
+                      else "-nographic";
         }
         ''
           # Create a /boot EFI partition with 40M and arbitrary but fixed GUIDs for reproducibility
@@ -192,6 +202,8 @@ let
           # Install GRUB and generate the GRUB boot menu.
           touch /etc/NIXOS
           mkdir -p /nix/var/nix/profiles
+          # FIXME why is this required ?
+          export USER=root
           ${config.system.build.toplevel}/bin/switch-to-configuration boot
 
           umount /boot
@@ -504,13 +516,14 @@ in
       (mkIf (pkgs.stdenv.isAarch32 || pkgs.stdenv.isAarch64) [
         "-device virtio-gpu-pci" "-device usb-ehci,id=usb0" "-device usb-kbd" "-device usb-tablet"
       ])
-      (mkIf (!cfg.useBootLoader) [
+      (mkIf (!cfg.useBootLoader || (cfg.useBootLoader && cfg.useEFIBoot)) [
         "-kernel ${config.system.build.toplevel}/kernel"
         "-initrd ${config.system.build.toplevel}/initrd"
         ''-append "$(cat ${config.system.build.toplevel}/kernel-params) init=${config.system.build.toplevel}/init regInfo=${regInfo}/registration ${consoles} $QEMU_KERNEL_PARAMS"''
       ])
       (mkIf cfg.useEFIBoot [
-        "-pflash $TMPDIR/bios.bin"
+        "-drive if=pflash,format=raw,readonly,file=$TMP/efi_firmware.bin"
+        "-drive if=pflash,format=raw,file=$TMP/efi_vars.bin"
       ])
       (mkIf (!cfg.graphics) [
         "-nographic"

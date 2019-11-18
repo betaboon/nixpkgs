@@ -148,10 +148,14 @@ def write_refind_config(path, default_generation, generations):
                 **generation_details(*generation)
             ))
 
-        f.write(MENU_ENTRY.format(
-            **generation_details(*default_generation),
-            submenuentries="\n".join(submenuentries)
-        ))
+        # FIXME - this fails when there are no generations
+        try:
+            f.write(MENU_ENTRY.format(
+                **generation_details(*default_generation),
+                submenuentries="\n".join(submenuentries)
+            ))
+        except:
+            pass
 
 
 def main():
