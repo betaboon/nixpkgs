@@ -27,6 +27,7 @@
 , systemd
 , dbus
 , substituteAll
+, buildPackages
 }:
 
 stdenv.mkDerivation rec {
@@ -43,7 +44,7 @@ stdenv.mkDerivation rec {
   patches = [
     (substituteAll {
       src = ./fix-paths.patch;
-      inherit asciidoc;
+      inherit (buildPackages) asciidoc;
     })
   ] ++ lib.optionals (stdenv.hostPlatform.isi686) [
     # Upstream: https://gitlab.gnome.org/GNOME/tracker/-/issues/332
