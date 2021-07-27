@@ -28,7 +28,7 @@
 , gsettings-desktop-schemas
 , gst_all_1
 , sassc
-, trackerSupport ? stdenv.isLinux
+, trackerSupport ? stdenv.isLinux && (stdenv.buildPlatform == stdenv.hostPlatform)
 , tracker
 , x11Support ? stdenv.isLinux
 , waylandSupport ? stdenv.isLinux
