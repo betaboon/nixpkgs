@@ -43,6 +43,7 @@
 , taglib
 , upower
 , totem-pl-parser
+, buildPackages
 }:
 
 stdenv.mkDerivation rec {
@@ -116,7 +117,7 @@ stdenv.mkDerivation rec {
   patches = [
     (substituteAll {
       src = ./fix-paths.patch;
-      inherit asciidoc;
+      inherit (buildPackages) asciidoc;
     })
   ];
 
