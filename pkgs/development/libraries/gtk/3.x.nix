@@ -31,7 +31,7 @@
 , gnome
 , gsettings-desktop-schemas
 , sassc
-, trackerSupport ? stdenv.isLinux
+, trackerSupport ? stdenv.isLinux && (stdenv.buildPlatform == stdenv.hostPlatform)
 , tracker
 , x11Support ? stdenv.isLinux
 , waylandSupport ? stdenv.isLinux
@@ -40,11 +40,13 @@
 , wayland-protocols
 , xineramaSupport ? stdenv.isLinux
 , cupsSupport ? stdenv.isLinux
-, withGtkDoc ? stdenv.isLinux
+, withGtkDoc ? stdenv.isLinux && (stdenv.buildPlatform == stdenv.hostPlatform)
 , cups
 , AppKit
 , Cocoa
 , broadwaySupport ? true
+, wayland-scanner
+, buildPackages
 }:
 
 let
@@ -85,6 +87,9 @@ stdenv.mkDerivation rec {
     ./patches/3.0-darwin-x11.patch
   ];
 
+  depsBuildBuild = [ pkg-config ] ++ lib.optionals (stdenv.buildPlatform != stdenv.hostPlatform) [
+    buildPackages.gtk3
+  ];
   nativeBuildInputs = [
     gettext
     gobject-introspection
@@ -94,6 +99,8 @@ stdenv.mkDerivation rec {
     pkg-config
     python3
     sassc
+    wayland-scanner
+    gdk-pixbuf
   ] ++ setupHooks ++ lib.optionals withGtkDoc [
     docbook_xml_dtd_43
     docbook-xsl-nons
@@ -150,6 +157,8 @@ stdenv.mkDerivation rec {
     "-Dbroadway_backend=${lib.boolToString broadwaySupport}"
     "-Dx11_backend=${lib.boolToString x11Support}"
     "-Dquartz_backend=${lib.boolToString (stdenv.isDarwin && !x11Support)}"
+  ] ++ lib.optionals (stdenv.buildPlatform != stdenv.hostPlatform) [
+    "-Dintrospection=false"
   ];
 
   doCheck = false; # needs X11
@@ -178,6 +187,10 @@ stdenv.mkDerivation rec {
 
     chmod +x ''${files[@]}
     patchShebangs ''${files[@]}
+  '' + lib.optionalString (stdenv.buildPlatform != stdenv.hostPlatform) ''
+    # It might be better to change the caller arguments instead of hacking it here.
+    substituteInPlace build-aux/meson/post-install.py \
+      --replace "gtk_bindir = sys.argv[3]" "gtk_bindir = '${buildPackages.gtk3}/bin'"
   '';
 
   postInstall = lib.optionalString (!stdenv.isDarwin) ''
@@ -187,6 +200,8 @@ stdenv.mkDerivation rec {
     moveToOutput bin/gtk-launch "$out"
     # Broadway daemon
     moveToOutput bin/broadwayd "$out"
+    # Required for cross-compilation
+    moveToOutput bin/gtk-query-immodules-3.0 "$out"
 
     # TODO: patch glib directly
     for f in $dev/bin/gtk-encode-symbolic-svg; do
