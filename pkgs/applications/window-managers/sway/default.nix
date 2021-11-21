@@ -35,6 +35,9 @@ stdenv.mkDerivation rec {
     echo -e '\ninclude /etc/sway/config.d/*' >> config.in
   '';
 
+  strictDeps = true;
+  depsBuildBuild = [ pkg-config ];
+
   nativeBuildInputs = [
     meson ninja pkg-config wayland-scanner scdoc
   ];
