@@ -107,6 +107,10 @@ stdenv.mkDerivation rec {
         -i gdk-pixbuf-loader/librsvg.thumbnailer.in
   '';
 
+  preConfigure = lib.optionalString (stdenv.buildPlatform != stdenv.hostPlatform) ''
+    export RUSTFLAGS="-Clinker=$CC"
+  '';
+
   # Not generated when cross compiling.
   postInstall = lib.optionalString (stdenv.hostPlatform == stdenv.buildPlatform) ''
     # Merge gdkpixbuf and librsvg loaders
