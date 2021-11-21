@@ -1,0 +1,55 @@
+From 859bd26ca147901e746e88056967353f6850ed9b Mon Sep 17 00:00:00 2001
+From: betaboon <betaboon@0x80.ninja>
+Date: Sun, 21 Nov 2021 13:10:40 +0100
+Subject: [PATCH 1/1] remove AX_PYTHON_DEVEL
+
+AX_PYTHON_DEVEL macro from the autoconf-archive collection doesn't work
+when we're trying to cross-compile python bindings in environments such
+as buildroot or yocto. It can't properly detect the location of python
+headers.
+
+Let's use AM_PATH_PYTHON to detect the python3 interpreter and then
+either take the PYTHON_CPPFLAGS and PYTHON_LIBS variables from the
+environment (so that cross-compiling build systems can pass their
+custom locations to autotools) or try to detect them ourselves using
+the python3-config tool.
+
+(adapted from: https://sw.acrios.com/acrios/libgpiod/-/commit/696de1b973647a871a22e2b8d4eeb0649c64de59)
+---
+ Makefile.am  | 1 -
+ configure.ac | 7 +++++--
+ 2 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/Makefile.am b/Makefile.am
+index fb5390f..546af94 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -321,7 +321,6 @@ nobase_dist_installed_test_PYTHON = \
+ installed_test_test_DATA = $(installed_test_test_data)
+ installed_test_meta_DATA = $(installed_test_metadata)
+ else
+-noinst_PROGRAMS = $(test_programs)
+ dist_noinst_SCRIPTS = \
+ 	$(dist_test_py) \
+ 	$(dist_test_sh) \
+diff --git a/configure.ac b/configure.ac
+index b050aff..ca69930 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -78,8 +78,11 @@ AS_IF([test -n "$PYTHON_INCLUDES"],
+   [PYTHON_CPPFLAGS="$PYTHON_CPPFLAGS $PYTHON_INCLUDES"])
+ 
+ AS_IF([test -z "$PYTHON_VERSION" && test -z "$PYTHON"], [PYTHON_VERSION=3])
+-AX_PYTHON_DEVEL([>= '2.7'])
+-AM_PATH_PYTHON
++AM_PATH_PYTHON([2.7])
++AS_IF([test -z "$PYTHON_CPPFLAGS"],
++		[AC_SUBST(PYTHON_CPPFLAGS, [`$PYTHON-config --includes`])])
++	AS_IF([test -z "$PYTHON_LIBS"],
++		[AC_SUBST(PYTHON_LIBS, [`$PYTHON-config --libs`])])
+ 
+ # This command exits 0 (success) if sys.version >= "3", or 1 (failure)
+ # if sys.version < "3" (i.e. starts with "2").
+-- 
+2.33.1
+

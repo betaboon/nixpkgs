@@ -1,40 +1,63 @@
-{ lib, stdenv, fetchPypi, buildPythonPackage, python, pkg-config, dbus, dbus-glib, isPyPy
-, ncurses, pygobject3, isPy3k }:
+{ stdenv
+, lib
+, fetchFromGitLab
+, autoreconfHook
+, autoconf-archive
+, pkg-config
+, python3
+, pygobject3
+, dbus
+, dbus-glib
+, ncurses
+}:
 
-buildPythonPackage rec {
+with lib;
+
+stdenv.mkDerivation rec {
   pname = "dbus-python";
-  version = "1.2.16";
-  format = "other";
+  version = "1.2.18";
 
   outputs = [ "out" "dev" ];
 
-  src = fetchPypi {
-    inherit pname version;
-    sha256 = "196m5rk3qzw5nkmgzjl7wmq0v7vpwfhh8bz2sapdi5f9hqfqy8qi";
+  src = fetchFromGitLab {
+    domain = "gitlab.freedesktop.org";
+    owner = "dbus";
+    repo = pname;
+    rev = "${pname}-${version}";
+    sha256 = "147nwvl3b92vramsmxnfqjmalp4yj13v0lyxzajfkszgyl3xwbxs";
   };
 
   patches = [
     ./fix-includedir.patch
+    ./fix-cross-compilation.patch
   ];
 
-  disabled = isPyPy;
+  autoreconfPhase = "NOCONFIGURE=1 ./autogen.sh";
 
-  preConfigure = if (lib.versionAtLeast stdenv.hostPlatform.darwinMinVersion "11" && stdenv.isDarwin) then ''
-    MACOSX_DEPLOYMENT_TARGET=10.16
-  '' else null;
+  preConfigure =
+    if (lib.versionAtLeast stdenv.hostPlatform.darwinMinVersion "11" && stdenv.isDarwin) then ''
+      MACOSX_DEPLOYMENT_TARGET=10.16
+    '' else null;
 
-  nativeBuildInputs = [ pkg-config ];
+  nativeBuildInputs = [
+    pkg-config
+    autoconf-archive
+    autoreconfHook
+    python3
+  ];
+
   buildInputs = [ dbus dbus-glib ]
     # My guess why it's sometimes trying to -lncurses.
     # It seems not to retain the dependency anyway.
-    ++ lib.optional (! python ? modules) ncurses;
+    ++ lib.optional (! python3 ? modules) ncurses;
 
-  doCheck = isPy3k;
   checkInputs = [ dbus.out pygobject3 ];
 
   meta = {
     description = "Python DBus bindings";
+    homepage = "https://gitlab.freedesktop.org/dbus/dbus-python";
     license = lib.licenses.mit;
     platforms = dbus.meta.platforms;
   };
+
 }
