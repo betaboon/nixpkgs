@@ -10,13 +10,13 @@
 
 stdenv.mkDerivation rec {
   pname = "icamerasrc";
-  version = "20221209";
+  version = "unstable-2023-03-09";
 
   src = fetchFromGitHub {
     owner = "intel";
     repo = "icamerasrc";
-    rev = "refs/tags/rpl_plat_${version}_pv";
-    hash = "sha256-qlV363l4tUjUAa1LiZQq55byKpz1tLESKAXEmgiYHVo=";
+    rev = "17841ab6249aaa69bd9b3959262bf182dee74111";
+    hash = "sha256-j8ZYe4nyy5yfo10CGeXDwbAaAPvdr0ptMWB8hQDyESQ=";
   };
 
   nativeBuildInputs = [
