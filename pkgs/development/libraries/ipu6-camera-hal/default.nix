@@ -52,14 +52,14 @@ stdenv.mkDerivation {
     gst_all_1.gst-plugins-base
   ];
 
-  preFixup = ''
-    ls -lah $out/lib/pkgconfig/
-    sed -Ei \
-      -e "s,^prefix=.*,prefix=$out," \
-      -e "s,^exec_prefix=.*,exec_prefix=''${prefix}," \
-      -e "s,^libdir=.*,libdir=''${prefix}/lib," \
-      -e "s,^includedir=.*,includedir=''${prefix}/include/libcamhal," \
-      $out/lib/pkgconfig/libcamhal.pc
+  postPatch = ''
+    substituteInPlace src/platformdata/PlatformData.h \
+      --replace '/usr/share/' "$out/share/"
+  '';
+
+  postFixup = ''
+    substituteInPlace $out/lib/pkgconfig/libcamhal.pc \
+      --replace 'prefix=/usr' "prefix=$out"
   '';
 
   meta = with lib; {
