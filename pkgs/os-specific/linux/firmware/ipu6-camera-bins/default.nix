@@ -1,6 +1,9 @@
 { lib
 , stdenv
 , fetchFromGitHub
+, autoPatchelfHook
+, expat
+, zlib
 
 # Pick one of
 # - ipu6 (Tiger Lake)
@@ -20,6 +23,13 @@ stdenv.mkDerivation {
   };
 
   sourceRoot = "source/${ipuVersion}";
+
+  nativeBuildInputs = [
+    autoPatchelfHook
+    expat
+    stdenv.cc.cc.lib
+    zlib
+  ];
 
   installPhase = ''
     runHook preInstall
