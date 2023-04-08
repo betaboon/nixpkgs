@@ -34,6 +34,11 @@ in
       SUBSYSTEM=="intel-ipu6-psys", MODE="0660", GROUP="video"
     '';
 
+    services.v4l2-relayd = {
+      enable = mkDefault true;
+      input.format = mkIf (cfg.platform == "ipu6ep") (mkDefault "NV12");
+    };
+
   };
 
 }
